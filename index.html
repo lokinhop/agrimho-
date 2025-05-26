@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PAC-MAN Conexão Campo-Cidade</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #1a1a2e;
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+        }
+
+        #game-container {
+            position: relative;
+            width: 400px;
+            height: 500px;
+            background-color: #16213e;
+            border: 5px solid #0f3460;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+
+        #maze {
+            position: absolute;
+            width: 100%;
+            height: 80%;
+            background-color: #16213e;
+        }
+
+        .wall {
+            position: absolute;
+            background-color: #0f3460;
+            border-radius: 5px;
+        }
+
+        .dot {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background-color: #e94560;
+            border-radius: 50%;
+        }
+
+        .power-pellet {
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            background-color: #f9b208;
+            border-radius: 50%;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+
+        #pacman {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background-color: #f9b208;
+            border-radius: 50%;
+            z-index: 10;
+        }
+
+        .ghost {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border-radius: 10px 10px 0 0;
+            z-index: 5;
+        }
+
+        #score-display {
+            position: absolute;
+            top: 410px;
+            left: 20px;
+            color: #fff;
+            font-size: 18px;
+        }
+
+        #lives-display {
+            position: absolute;
+            top: 440px;
+            left: 20px;
+            color: #fff;
+            font-size: 18px;
+        }
+
+        #game-over, #win-screen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #e94560;
+            font-size: 30px;
+            font-weight: bold;
+            text-align: center;
+            display: none;
+            z-index: 20;
+            background-color: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+        }
+
+        #win-screen {
+            color: #4cc9f0;
+        }
+
+        button {
+            background-color: #e94560;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin-top: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:hover {
+            background-color: #f9b208;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="score-display">Pontos: 0</div>
+        <div id="lives-display">Vidas: 3</div>
+        <div id="maze"></div>
+        <div id="pacman"></div>
+        <div id="game-over">
+            FIM DE JOGO!<br>
+            <button onclick="resetGame()">Jogar Novamente</button>
+        </div>
+        <div id="win-screen">
+            VOCÊ VENCEU! 🎉<br>
+            <button onclick="resetGame()">Jogar Novamente</button>
+        </div>
+    </div>
+
+    <script>
+        // Configurações do jogo
+        const config = {
+            pacmanSpeed: 3,
+            ghostSpeed: 1.5,
+            dotSize: 8,
+            pelletSize: 16,
+            cellSize: 20
+        };
+
+        // Estado do jogo
+        const gameState = {
+            score: 0,
+            lives: 3,
+            gameOver: false,
+            win: false,
+            pacman: {
+                x: 180,
+                y: 300,
+                direction: 'right',
+                nextDirection: 'right',
+                mouthOpen: true
+            },
+            ghosts: [
+                { x: 180, y: 180, color: '#e94560', direction: 'up', speed: config.ghostSpeed }, // Fantasma Vermelho (Cidade)
+                { x: 200, y: 180, color: '#4cc9f0', direction: 'left', speed: config.ghostSpeed }, // Fantasma Azul (Água)
+                { x: 160, y: 180, color: '#a7c957', direction: 'right', speed: config.ghostSpeed }  // Fantasma Verde (Campo)
+            ],
+            dots: [],
+            pellets: [],
+            walls: []
+        };
+
+        // Elementos do DOM
+        const gameContainer = document.getElementById('game-container');
+        const maze = document.getElementById('maze');
+        const pacmanElement = document.getElementById('pacman');
+        const scoreDisplay = document.getElementById('score-display');
+        const livesDisplay = document.getElementById('lives-display');
+        const gameOverDisplay = document.getElementById('game-over');
+        const winDisplay = document.getElementById('win-screen');
+
+        // Inicializa o labirinto
+        function initializeMaze() {
+            maze.innerHTML = '';
+            gameState.dots = [];
+            gameState.pellets = [];
+            gameState.walls = [];
+
+            // Cria paredes (labirinto temático)
+            createWalls();
+
+            // Cria pontos (alimentos do campo e da cidade)
+            createDots();
+
+            // Cria power pellets (itens especiais)
+            createPellets();
+
+            // Posiciona o Pac-Man
+            pacmanElement.style.left = gameState.pacman.x + 'px';
+            pacmanElement.style.top = gameState.pacman.y + 'px';
+
+            // Cria fantasmas
+            createGhosts();
+        }
+
+        function createWalls() {
+            // Paredes externas
+            addWall(0, 0, 400, 20); // Topo
+            addWall(0, 380, 400, 20); // Base
+            addWall(0, 0, 20, 400); // Esquerda
+            addWall(380, 0, 20, 400); // Direita
+
+            // Labirinto temático (conexão campo-cidade)
+            addWall(100, 60, 200, 20); // Estrada
+            addWall(100, 140, 200, 20); // Ponte
+            addWall(60, 100, 20, 200); // Cerca do campo
+            addWall(320, 100, 20, 200); // Prédios da cidade
+            addWall(180, 220, 40, 40); // Lago (área bloqueada)
+        }
+
+        function addWall(x, y, width, height) {
+            const wall = document.createElement('div');
+            wall.className = 'wall';
+            wall.style.left = x + 'px';
+            wall.style.top = y + 'px';
+            wall.style.width = width + 'px';
+            wall.style.height = height + 'px';
+            maze.appendChild(wall);
+
+            gameState.walls.push({ x, y, width, height });
+        }
+
+        function createDots() {
+            // Pontos representando alimentos (campo: trigo, cidade: pão)
+            for (let y = 40; y < 360; y += config.cellSize) {
+                for (let x = 40; x < 360; x += config.cellSize) {
+                    if (!isWallAt(x, y, config.dotSize, config.dotSize)) {
+                        const dot = document.createElement('div');
+                        dot.className = 'dot';
+                        dot.style.left = (x - config.dotSize/2) + 'px';
+                        dot.style.top = (y - config.dotSize/2) + 'px';
+                        maze.appendChild(dot);
+
+                        gameState.dots.push({ 
+                            x: x - config.dotSize/2, 
+                            y: y - config.dotSize/2,
+                            element: dot,
+                            collected: false
+                        });
+                    }
+                }
+            }
+        }
+
+        function createPellets() {
+            // Power pellets (itens especiais: sol (campo) e energia (cidade))
+            const positions = [
+                { x: 60, y: 60 },  // Canto superior esquerdo (campo)
+                { x: 340, y: 60 },  // Canto superior direito (cidade)
+                { x: 60, y: 340 },  // Canto inferior esquerdo (campo)
+                { x: 340, y: 340 }   // Canto inferior direito (cidade)
+            ];
+
+            positions.forEach(pos => {
+                const pellet = document.createElement('div');
+                pellet.className = 'power-pellet';
+                pellet.style.left = (pos.x - config.pelletSize/2) + 'px';
+                pellet.style.top = (pos.y - config.pelletSize/2) + 'px';
+                maze.appendChild(pellet);
+
+                gameState.pellets.push({
+                    x: pos.x - config.pelletSize/2,
+                    y: pos.y - config.pelletSize/2,
+                    element: pellet,
+                    collected: false
+                });
+            });
+        }
+
+        function createGhosts() {
+            gameState.ghosts.forEach(ghost => {
+                const ghostElement = document.createElement('div');
+                ghostElement.className = 'ghost';
+                ghostElement.style.left = ghost.x + 'px';
+                ghostElement.style.top = ghost.y + 'px';
+                ghostElement.style.backgroundColor = ghost.color;
+                maze.appendChild(ghostElement);
+                ghost.element = ghostElement;
+            });
+        }
+
+        function isWallAt(x, y, width, height) {
+            for (const wall of gameState.walls) {
+                if (x + width > wall.x && x < wall.x + wall.width &&
+                    y + height > wall.y && y < wall.y + wall.height) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Controles do teclado
+        document.addEventListener('keydown', (e) => {
+            if (gameState.gameOver || gameState.win) return;
+
+            switch (e.key) {
+                case 'ArrowUp':
+                    gameState.pacman.nextDirection = 'up';
+                    break;
+                case 'ArrowDown':
+                    gameState.pacman.nextDirection = 'down';
+                    break;
+                case 'ArrowLeft':
+                    gameState.pacman.nextDirection = 'left';
+                    break;
+                case 'ArrowRight':
+                    gameState.pacman.nextDirection = 'right';
+                    break;
+            }
+        });
+
+        // Atualiza o jogo
+        function update() {
+            if (gameState.gameOver || gameState.win) return;
+
+            movePacman();
+            moveGhosts();
+            checkCollisions();
+            checkDots();
+            checkPellets();
+            animatePacman();
+            checkWin();
+
+            // Atualiza displays
+            scoreDisplay.textContent = `Pontos: ${gameState.score}`;
+            livesDisplay.textContent = `Vidas: ${gameState.lives}`;
+        }
+
+        function movePacman() {
+            const pacman = gameState.pacman;
+            const size = 20;
+
+            // Tenta mudar de direção
+            const nextDir = pacman.nextDirection;
+            let canChangeDirection = false;
+
+            switch (nextDir) {
+                case 'up':
+                    if (!isWallAt(pacman.x, pacman.y - config.pacmanSpeed, size, size)) {
+                        canChangeDirection = true;
+                    }
+                    break;
+                case 'down':
+                    if (!isWallAt(pacman.x, pacman.y + config.pacmanSpeed, size, size)) {
+                        canChangeDirection = true;
+                    }
+                    break;
+                case 'left':
+                    if (!isWallAt(pacman.x - config.pacmanSpeed, pacman.y, size, size)) {
+                        canChangeDirection = true;
+                    }
+                    break;
+                case 'right':
+                    if (!isWallAt(pacman.x + config.pacmanSpeed, pacman.y, size, size)) {
+                        canChangeDirection = true;
+                    }
+                    break;
+            }
+
+            if (canChangeDirection) {
+                pacman.direction = nextDir;
+            }
+
+            // Movimenta o Pac-Man
+            switch (pacman.direction) {
+                case 'up':
+                    if (!isWallAt(pacman.x, pacman.y - config.pacmanSpeed, size, size)) {
+                        pacman.y -= config.pacmanSpeed;
+                    }
+                    break;
+                case 'down':
+                    if (!isWallAt(pacman.x, pacman.y + config.pacmanSpeed, size, size)) {
+                        pacman.y += config.pacmanSpeed;
+                    }
+                    break;
+                case 'left':
+                    if (!isWallAt(pacman.x - config.pacmanSpeed, pacman.y, size, size)) {
+                        pacman.x -= config.pacmanSpeed;
+                    }
+                    break;
+                case 'right':
+                    if (!isWallAt(pacman.x + config.pacmanSpeed, pacman.y, size, size)) {
+                        pacman.x += config.pacmanSpeed;
+                    }
+                    break;
+            }
+
+            // Teleporte nos túneis (conexão campo-cidade)
+            if (pacman.x < -size) {
+                pacman.x = gameContainer.offsetWidth;
+            } else if (pacman.x > gameContainer.offsetWidth) {
+                pacman.x = -size;
+            }
+
+            // Atualiza posição no DOM
+            pacmanElement.style.left = pacman.x + 'px';
+            pacmanElement.style.top = pacman.y + 'px';
+        }
+
+        function moveGhosts() {
+            gameState.ghosts.forEach(ghost => {
+                const size = 20;
+                let directions = ['up', 'down', 'left', 'right'];
+
+                // Remove a direção oposta para evitar movimento oscilante
+                directions = directions.filter(dir => {
+                    return !(dir === 'up' && ghost.direction === 'down') &&
+                           !(dir === 'down' && ghost.direction === 'up') &&
+                           !(dir === 'left' && ghost.direction === 'right') &&
+                           !(dir === 'right' && ghost.direction === 'left');
+                });
+
+                // Tenta continuar na mesma direção
+                if (!isWallInDirection(ghost, ghost.direction)) {
+                    moveGhost(ghost, ghost.direction);
+                    return;
+                }
+
+                // Se não puder, escolhe uma direção aleatória válida
+                const validDirections = directions.filter(dir => !isWallInDirection(ghost, dir));
+
+                if (validDirections.length > 0) {
+                    const randomDir = validDirections[Math.floor(Math.random() * validDirections.length)];
+                    ghost.direction = randomDir;
+                    moveGhost(ghost, randomDir);
+                }
+            });
+        }
+
+        function isWallInDirection(ghost, direction) {
+            const size = 20;
+            const speed = ghost.speed;
+
+            switch (direction) {
+                case 'up':
+                    return isWallAt(ghost.x, ghost.y - speed, size, size);
+                case 'down':
+                    return isWallAt(ghost.x, ghost.y + speed, size, size);
+                case 'left':
+                    return isWallAt(ghost.x - speed, ghost.y, size, size);
+                case 'right':
+                    return isWallAt(ghost.x + speed, ghost.y, size, size);
+            }
+            return true;
+        }
+
+        function moveGhost(ghost, direction) {
+            const size = 20;
+
+            switch (direction) {
+                case 'up':
+                    ghost.y -= ghost.speed;
+                    break;
+                case 'down':
+                    ghost.y += ghost.speed;
+                    break;
+                case 'left':
+                    ghost.x -= ghost.speed;
+                    break;
+                case 'right':
+                    ghost.x += ghost.speed;
+                    break;
+            }
+
+            // Teleporte nos túneis (para fantasmas também)
+            if (ghost.x < -size) {
+                ghost.x = gameContainer.offsetWidth;
+            } else if (ghost.x > gameContainer.offsetWidth) {
+                ghost.x = -size;
+            }
+
+            // Atualiza posição no DOM
+            ghost.element.style.left = ghost.x + 'px';
+            ghost.element.style.top = ghost.y + 'px';
+        }
+
+        function checkCollisions() {
+            const pacman = gameState.pacman;
+            const pacmanSize = 20;
+
+            gameState.ghosts.forEach(ghost => {
+                const ghostSize = 20;
+
+                // Verifica colisão com Pac-Man
+                if (Math.abs(pacman.x - ghost.x) < pacmanSize/2 + ghostSize/2 &&
+                    Math.abs(pacman.y - ghost.y) < pacmanSize/2 + ghostSize/2) {
+                    
+                    // Perde uma vida
+                    gameState.lives--;
+                    
+                    if (gameState.lives <= 0) {
+                        gameOver();
+                    } else {
+                        // Reseta posições
+                        resetPositions();
+                    }
+                }
+            });
+        }
+
+        function checkDots() {
+            const pacman = gameState.pacman;
+            const pacmanSize = 20;
+
+            gameState.dots.forEach(dot => {
+                if (!dot.collected) {
+                    const dotSize = config.dotSize;
+                    const dotCenterX = dot.x + dotSize/2;
+                    const dotCenterY = dot.y + dotSize/2;
+                    const pacmanCenterX = pacman.x + pacmanSize/2;
+                    const pacmanCenterY = pacman.y + pacmanSize/2;
+
+                    if (Math.abs(pacmanCenterX - dotCenterX) < pacmanSize/2 + dotSize/2 &&
+                        Math.abs(pacmanCenterY - dotCenterY) < pacmanSize/2 + dotSize/2) {
+
+                        dot.collected = true;
+                        dot.element.style.display = 'none';
+                        gameState.score += 10;
+                    }
+                }
+            });
+        }
+
+        function checkPellets() {
+            const pacman = gameState.pacman;
+            const pacmanSize = 20;
+
+            gameState.pellets.forEach(pellet => {
+                if (!pellet.collected) {
+                    const pelletSize = config.pelletSize;
+                    const pelletCenterX = pellet.x + pelletSize/2;
+                    const pelletCenterY = pellet.y + pelletSize/2;
+                    const pacmanCenterX = pacman.x + pacmanSize/2;
+                    const pacmanCenterY = pacman.y + pacmanSize/2;
+
+                    if (Math.abs(pacmanCenterX - pelletCenterX) < pacmanSize/2 + pelletSize/2 &&
+                        Math.abs(pacmanCenterY - pelletCenterY) < pacmanSize/2 + pelletSize/2) {
+
+                        pellet.collected = true;
+                        pellet.element.style.display = 'none';
+                        gameState.score += 50;
+                    }
+                }
+            });
+        }
+
+        function checkWin() {
+            const allDotsCollected = gameState.dots.every(dot => dot.collected);
+            const allPelletsCollected = gameState.pellets.every(pellet => pellet.collected);
+
+            if (allDotsCollected && allPelletsCollected) {
+                gameState.win = true;
+                winDisplay.style.display = 'block';
+            }
+        }
+
+        function animatePacman() {
+            const pacman = gameState.pacman;
+
+            // Alterna a boca aberta/fechada
+            pacman.mouthOpen = !pacman.mouthOpen;
+
+            // Cria o efeito visual da boca do Pac-Man
+            if (pacman.mouthOpen) {
+                pacmanElement.style.clipPath = getPacmanClipPath(pacman.direction, 35);
+            } else {
+                pacmanElement.style.clipPath = getPacmanClipPath(pacman.direction, 0);
+            }
+        }
+
+        function getPacmanClipPath(direction, angle) {
+            switch (direction) {
+                case 'right':
+                    return `polygon(50% 50%, 100% ${50 - angle}%, 100% ${50 + angle}%)`;
+                case 'left':
+                    return `polygon(50% 50%, 0% ${50 + angle}%, 0% ${50 - angle}%)`;
+                case 'up':
+                    return `polygon(50% 50%, ${50 + angle}% 0%, ${50 - angle}% 0%)`;
+                case 'down':
+                    return `polygon(50% 50%, ${50 - angle}% 100%, ${50 + angle}% 100%)`;
+                default:
+                    return '';
+            }
+        }
+
+        function resetPositions() {
+            // Reseta Pac-Man
+            gameState.pacman.x = 180;
+            gameState.pacman.y = 300;
+            gameState.pacman.direction = 'right';
+            gameState.pacman.nextDirection = 'right';
+
+            // Reseta fantasmas
+            gameState.ghosts[0].x = 180;
+            gameState.ghosts[0].y = 180;
+            gameState.ghosts[1].x = 200;
+            gameState.ghosts[1].y = 180;
+            gameState.ghosts[2].x = 160;
+            gameState.ghosts[2].y = 180;
+        }
+
+        function gameOver() {
+            gameState.gameOver = true;
+            gameOverDisplay.style.display = 'block';
+        }
+
+        function resetGame() {
+            gameState.score = 0;
+            gameState.lives = 3;
+            gameState.gameOver = false;
+            gameState.win = false;
+            gameOverDisplay.style.display = 'none';
+            winDisplay.style.display = 'none';
+            initializeMaze();
+        }
+
+        // Inicializa o jogo
+        initializeMaze();
+
+        // Loop do jogo
+        setInterval(update, 1000/60); // 60 FPS
+    </script>
+</body>
+</html>
